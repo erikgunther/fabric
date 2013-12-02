@@ -11,3 +11,4 @@ Fudge < 1.0
 # Documentation generation
 Sphinx >= 0.6
 releases >= 0.2.0
+Flask

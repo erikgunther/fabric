@@ -385,15 +385,34 @@ def _task_names(mapping):
     return tasks
 
 
-def _print_docstring(docstrings, name):
-    if not docstrings:
-        return False
-    docstring = crawl(name, state.commands).__doc__
+def get_task_names():
+    """
+    Return the list with available tasks.
+
+    :rtype: All Commands as a List of Strings
+    """
+    return _task_names(state.commands)
+
+
+def get_docstring(task_name):
+    """
+    Return the docstring for a task.
+
+    :param task_name: The task to get the docstring from.
+    :rtype: The docstring as String
+    """
+
+    docstring = crawl(task_name, state.commands).__doc__
     if isinstance(docstring, basestring):
-        return docstring
+        return docstring.strip()
+    else:
+        return ""
 
 
 def _normal_list(docstrings=True):
+    """
+    List all task with the first line of doc string
+    """
     result = []
     task_names = _task_names(state.commands)
     # Want separator between name, description to be straight col
@@ -403,7 +422,7 @@ def _normal_list(docstrings=True):
     max_width = _pty_size()[1] - 1 - len(trail)
     for name in task_names:
         output = None
-        docstring = _print_docstring(docstrings, name)
+        docstring = get_docstring(name) if docstrings else False
         if docstring:
             lines = filter(None, docstring.splitlines())
             first_line = lines[0].strip()

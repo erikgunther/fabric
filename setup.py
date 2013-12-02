@@ -41,6 +41,7 @@ setup(
     entry_points={
         'console_scripts': [
             'fab = fabric.main:main',
+            'fab-server = fabric.rest:run_server'
         ]
     },
     classifiers=[
