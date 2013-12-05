@@ -7,10 +7,21 @@ the functionallaty of the local fabric script.
 """
 import sys
 import inspect
+import subprocess
+import random
+import time
+import threading
+import Queue
+import uuid
+from cStringIO import StringIO
 
 
+
+from fabric.thread_handling import ThreadHandler
+from fabric.io import output_loop, input_loop
 from fabric.network import disconnect_all, ssh
 from fabric.task_utils import crawl
+from fabric.api import execute, env, abort, puts
 from fabric.main import load_fabfile, find_fabfile, get_task_names
 from fabric.main import parse_options, get_docstring,  _escape_split, env_options
 import fabric.state as state
@@ -19,6 +30,32 @@ from flask import Flask, jsonify
 
 FABRIC_REST = Flask(__name__)
 FABRIC_REST.config['DEBUG'] = True
+FABRIC_JOBS = {}
+
+
+
+class AsynchronousFileReader(threading.Thread):
+    '''
+    Helper class to implement asynchronous reading of a file
+    in a separate thread. Pushes read lines on a queue to
+    be consumed in another thread.
+    '''
+
+    def __init__(self, fd, queue):
+        assert isinstance(queue, Queue.Queue)
+        assert callable(fd.readline)
+        threading.Thread.__init__(self)
+        self._fd = fd
+        self._queue = queue
+
+    def run(self):
+        '''The body of the tread: read lines and put them on the queue.'''
+        for line in iter(self._fd.readline, ''):
+            self._queue.put(line)
+
+    def eof(self):
+        '''Check whether there is no more content to expect.'''
+        return not self.is_alive() and self._queue.empty()
 
 
 @FABRIC_REST.route('/')
@@ -62,13 +99,90 @@ def list():
     return jsonify(task_list )
 
 
-@FABRIC_REST.route('/task/<task>')
-def task():
-    """
-    Execute the given task
-    """
+
+@FABRIC_REST.route('/task/<task>', methods=['POST', 'GET'])
+def task(task):
+    '''
+    Example of how to consume standard output and standard error of
+    a subprocess asynchronously without risk on deadlocking.
+    '''
+
+    global FABRIC_JOBS
+    jobid = str(uuid.uuid1())
+    jobid = '25';
+    FABRIC_JOBS[jobid] = {}
+    command = ['fab', '--abort-on-prompts']
+
+    from flask import request
+    password = request.args.get('password', '')
+    if password:
+        #Add password if added
+        command.append('-p')
+        command.append(password)
+
+    command.append(task)
+
+    FABRIC_JOBS[jobid]['command'] = command
+
+    # Launch the command as subprocess.
+    print "Will execute: {command}".format(command = command)
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    FABRIC_JOBS[jobid]['process'] = process
+
+    # Launch the asynchronous readers of the process' stdout and stderr.
+    stdout_queue = Queue.Queue()
+    stdout_reader = AsynchronousFileReader(process.stdout, stdout_queue)
+    stdout_reader.start()
+    FABRIC_JOBS[jobid]['stdout_reader'] = stdout_reader
+    FABRIC_JOBS[jobid]['stdout_queue'] = stdout_queue
+
+    stderr_queue = Queue.Queue()
+    stderr_reader = AsynchronousFileReader(process.stderr, stderr_queue)
+    stderr_reader.start()
+    FABRIC_JOBS[jobid]['stderr_reader'] = stderr_reader
+    FABRIC_JOBS[jobid]['stderr_queue'] = stderr_queue
+
+    return jobid
 
 
+@FABRIC_REST.route('/status/<jobid>')
+def status(jobid):
+    """
+    Return status of current run.
+    """
+
+    output = {
+        'stdout':'',
+        'stderr':'',
+        'done': False}
+
+    if jobid in FABRIC_JOBS:
+        # Check the queues if we received some output (until there is nothing more to get).
+        if not FABRIC_JOBS[jobid]['stdout_reader'].eof() or \
+           not FABRIC_JOBS[jobid]['stderr_reader'].eof():
+            # Show what we received from standard output.
+            while not FABRIC_JOBS[jobid]['stdout_queue'].empty():
+                line = FABRIC_JOBS[jobid]['stdout_queue'].get()
+                output['stdout'] += line
+
+            # Show what we received from standard error.
+            while not FABRIC_JOBS[jobid]['stderr_queue'].empty():
+                line = FABRIC_JOBS[jobid]['stderr_queue'].get()
+                output['stderr'] += line
+        else:
+            # Let's be tidy and join the threads we've started.
+            FABRIC_JOBS[jobid]['stdout_reader'].join()
+            FABRIC_JOBS[jobid]['stderr_reader'].join()
+
+            # Close subprocess' file descriptors.
+            FABRIC_JOBS[jobid]['process'].stdout.close()
+            FABRIC_JOBS[jobid]['process'].stderr.close()
+            del FABRIC_JOBS[jobid]
+            output['done'] = True
+
+    else:
+        output['done'] = True
+    return jsonify(output)
 
 def run_server():
     """
@@ -122,8 +236,7 @@ def run_server():
         state.commands.update(callables)
 
 
-
+    #print task('dummy')
     #Finally start the server
     FABRIC_REST.run()
-
 

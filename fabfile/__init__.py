@@ -6,11 +6,33 @@ from __future__ import with_statement
 
 import nose
 
-from fabric.api import abort, local, task
+from fabric.api import abort, local, task, sudo, env
 
 import docs
 import tag
+import time
 from utils import msg
+
+env.hosts = ['localhost','127.0.0.1']
+
+@task
+def dummy():
+
+    from fabric.api import run, puts
+    puts("Start")
+    local("echo '1 Dummy done!'")
+    run("echo '2 Dummy done!'")
+    time.sleep(4)
+    sudo("echo '3 Dummy done!'")
+    local("echo '4 Dummy done!'")
+
+
+@task
+def dummy_all():
+
+    from fabric.api import execute, hide
+    execute(dummy)
+
 
 
 @task(default=True)
