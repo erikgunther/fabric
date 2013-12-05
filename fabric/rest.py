@@ -99,12 +99,16 @@ def list():
     return jsonify(task_list )
 
 
-
 @FABRIC_REST.route('/task/<task>', methods=['POST', 'GET'])
 def task(task):
     '''
-    Example of how to consume standard output and standard error of
-    a subprocess asynchronously without risk on deadlocking.
+    This will start the execution of an task. It will return a uuid that
+    one later can check the status of the run.
+
+    Its also possible to send the password for sudo and ssh commands but
+    keep in mind the security problem of sending password over HTTP.
+    If you send it use ?password=<password>
+
     '''
 
     global FABRIC_JOBS
@@ -148,7 +152,16 @@ def task(task):
 @FABRIC_REST.route('/status/<jobid>')
 def status(jobid):
     """
-    Return status of current run.
+    Return status of current running process.
+
+    It will give you the output:
+
+    * done - Boolean if the task is done executing.
+    * stdout - All output to stdout from the previous call to /status
+    * stderr - Same as stdout but for stderr.
+
+    If the task is done this will also close all filehandles for the job.
+
     """
 
     output = {
